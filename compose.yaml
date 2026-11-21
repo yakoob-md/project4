@@ -1,0 +1,20 @@
+services:
+  web:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8080"
+    environment:
+      PAPERLENS_DB: /data/paperlens.sqlite
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      PAPERLENS_MODEL: ${PAPERLENS_MODEL:-}
+    volumes:
+      - paperlens_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+volumes:
+  paperlens_data:
