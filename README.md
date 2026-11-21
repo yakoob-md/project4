@@ -1,6 +1,19 @@
 # PaperLens
 
-This local, single-user prototype accepts empirical research papers and rough research ideas. It extracts locatable passages, queries arXiv, and saves runs and refinements in SQLite. Configuring a Groq model enables three specialist assessments with exact-quote validation and one bounded critique pass. The browser displays findings, objections, source passages, previous runs and export links.
+The Docker dashboard accepts research PDFs and pasted paper text. CrewAI orchestrates three independent reviews of frozen evidence in PostgreSQL. Google ADK retrieves arXiv records through A2A and MCP. The dashboard shows run status, findings, cited passages, and versioned JSON and Markdown downloads.
+
+Current verified behavior is recorded in [the implementation status](docs/implementation_status.md).
+
+## Run with Docker
+
+Start Docker Desktop, then run:
+
+    .\scripts\bootstrap.ps1
+    docker compose up -d --build web
+
+Open http://127.0.0.1:8000 and choose **Review a paper**. Upload a PDF or paste the paper text, enter a search phrase and literature cutoff, and select **Run analysis**. Open a cited passage or download either report format when the run completes. `bootstrap.ps1` creates `.env` and prompts for the Groq API key. Stop the stack with:
+
+    .\scripts\start.ps1 -Stop
 
 ## Run locally
 
@@ -22,6 +35,4 @@ The first command runs directly against the application handlers. The full suite
 
 ## Release status
 
-The local handler checks passed for PDF extraction with a literature-provider outage, saving and refining an idea, reading its original record, Markdown export, and critic retraction. The separate citation test rejected an invented quote. Model and provider calls still need a live run. Missing keys give an explicitly labelled evidence-only result.
-
-The web app currently uses direct provider calls, a synchronous request and a lightweight browser UI. The MCP tool server and ADK A2A service entry points under services/ are initial, unverified integration code. The required CrewAI Flow and A2A client, authenticated shared dashboard, PostgreSQL/pgvector, durable jobs, Langfuse traces and cloud release are pending. The Dockerfile packages only the local web application. The scientific evaluation and cloud acceptance runs for both modes remain open.
+The Python-only setup runs the legacy SQLite prototype. Docker runs the PostgreSQL paper path and its worker. The scientific evaluation, Langfuse acceptance, and authenticated two-mode cloud release remain open.

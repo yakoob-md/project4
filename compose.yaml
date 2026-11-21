@@ -1,14 +1,103 @@
+x-m0-telemetry: &m0-telemetry
+  M0_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+  LANGFUSE_HOST: ${LANGFUSE_HOST:-}
+  LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+  LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: paperlens
+      POSTGRES_USER: paperlens
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperlens -d paperlens"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:16686:16686"
+  mcp-tools:
+    build:
+      context: .
+      dockerfile: services/mcp_tools/Dockerfile
+    environment:
+      <<: *m0-telemetry
+      PORT: "9000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',9000),5); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  literature-adk:
+    build:
+      context: .
+      dockerfile: services/literature_adk/Dockerfile
+    environment:
+      <<: *m0-telemetry
+      MCP_SERVER_URL: http://mcp-tools:9000/mcp
+      A2A_ADVERTISED_HOST: literature-adk
+    ports:
+      - "127.0.0.1:8001:8001"
+    depends_on:
+      mcp-tools:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/.well-known/agent-card.json',timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+  review-worker:
+    build:
+      context: .
+      dockerfile: services/review_worker/Dockerfile
+    environment:
+      <<: *m0-telemetry
+      DATABASE_URL: postgresql://paperlens:${POSTGRES_PASSWORD}@postgres:5432/paperlens
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      CREWAI_MODEL: ${PAPERLENS_MODEL:-openai/gpt-oss-20b}
+      MCP_SERVER_URL: http://mcp-tools:9000/mcp
+      A2A_AGENT_URL: http://literature-adk:8001
+      CREWAI_TRACING_ENABLED: "false"
+      CREWAI_DISABLE_TELEMETRY: "true"
+    ports:
+      - "127.0.0.1:8002:8002"
+    depends_on:
+      literature-adk:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health',timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
   web:
     build: .
     ports:
       - "127.0.0.1:8000:8080"
     environment:
-      PAPERLENS_DB: /data/paperlens.sqlite
+      DATABASE_URL: postgresql://paperlens:${POSTGRES_PASSWORD}@postgres:5432/paperlens
+      PAPERLENS_ENV: ${PAPERLENS_ENV:-local}
+      AUTH_MODE: ${AUTH_MODE:-dev}
+      JWT_SECRET: ${JWT_SECRET}
+      INVITE_CODE: ${INVITE_CODE}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       PAPERLENS_MODEL: ${PAPERLENS_MODEL:-}
-    volumes:
-      - paperlens_data:/data
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    depends_on:
+      postgres:
+        condition: service_healthy
+      review-worker:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=5)"]
@@ -17,4 +106,4 @@ services:
       retries: 3
       start_period: 15s
 volumes:
-  paperlens_data:
+  postgres_data:

@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from paperlens.service import app
 from paperlens.core import Passage, Finding, Review, validate_review
+from pdf_fixture import text_pdf
 
 
 class ApplicationTests(unittest.TestCase):
@@ -29,8 +30,7 @@ class ApplicationTests(unittest.TestCase):
 
     @patch("paperlens.service.search",side_effect=TimeoutError)
     def test_pdf_outage_and_invalid_input(self,search):
-        with Path("material/Final_Project_Report_Template.pdf").open("rb") as pdf:
-            result = self.client.post("/runs",data=dict(mode="paper",cutoff="2026-01-01"),files={"pdf":("test.pdf",pdf,"application/pdf")})
+        result = self.client.post("/runs",data=dict(mode="paper",cutoff="2026-01-01"),files={"pdf":("test.pdf",text_pdf(),"application/pdf")})
         self.assertEqual(result.status_code,201)
         self.assertEqual(result.json()["sources"][0]["locator"],"Page 1")
         self.assertIn("unavailable",result.json()["warnings"][0])
@@ -38,7 +38,16 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual(bad.status_code,422)
 
     def test_citation_gate(self):
-        source = Passage(id="S1",text="Documented finding",locator="Page 1",title="Submission")
+        source = Passage(id="S1",text="Documented finding with enough context for exact validation",locator="Page 1",title="Submission")
         review = Review(findings=[Finding(assessment="result",action="verify",source="S1",quote="fabricated")],unknowns=[])
         with self.assertRaises(ValueError):
             validate_review(review,[source])
+
+    def test_exact_span_and_minimum_quote(self):
+        text = "Documented finding with enough context for exact validation"
+        source = Passage(id="S1",text=text,locator="Page 1",title="Submission")
+        valid = Finding(assessment="result",action="verify",source="S1",quote=text[11:42],char_start=11,char_end=42)
+        self.assertEqual(validate_review(Review(findings=[valid],unknowns=[]),[source]).findings[0].char_start,11)
+        short = Finding(assessment="result",action="verify",source="S1",quote="finding",char_start=11,char_end=18)
+        with self.assertRaises(ValueError):
+            validate_review(Review(findings=[short],unknowns=[]),[source])

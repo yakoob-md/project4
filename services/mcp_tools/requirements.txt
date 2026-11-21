@@ -1,0 +1,5 @@
+mcp==2.3.0
+httpx==0.28.1
+pydantic==2.13.4
+pypdf==5.1.0
+opentelemetry-exporter-otlp-proto-http==1.45.2

@@ -20,6 +20,10 @@ class Response(BaseModel):
     finding: dict | None = None
 
 
+class Closure(BaseModel):
+    dispositions: list[Literal["accepted", "rejected", "unresolved"]]
+
+
 class Replies(BaseModel):
     responses: list[Response] = Field(max_length=2)
 
@@ -49,7 +53,11 @@ def critique(reviews, sources, generate):
             candidate = list(findings)
             for c,r in zip(challenges,replies.responses):
                 if r.decision=="revise":
-                    candidate[c.index]=r.finding
+                    if r.finding is None:
+                        r.decision = "unresolved"
+                        r.reason = "Revision did not include a replacement finding"
+                    else:
+                        candidate[c.index]=r.finding
                 elif r.decision=="retract":
                     candidate[c.index]=None
             review = Review(findings=[f for f in candidate if f is not None],unknowns=original[owner]["unknowns"])
@@ -58,4 +66,13 @@ def critique(reviews, sources, generate):
             replies=Replies(responses=[Response(decision="unresolved",reason="No valid owner response") for _ in challenges])
         for c,r in zip(challenges,replies.responses):
             history.append({"challenge":c.model_dump(),"response":r.model_dump(),"original":findings[c.index]})
+    if history:
+        try:
+            closure = generate(Closure,"Close each challenge once without creating new challenges.",history)
+            if len(closure.dispositions) != len(history):
+                raise ValueError("Incomplete critique closure")
+        except (ValueError,RuntimeError):
+            closure = Closure(dispositions=["unresolved"] * len(history))
+        for item, disposition in zip(history, closure.dispositions):
+            item["disposition"] = disposition
     return revised,history

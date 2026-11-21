@@ -16,11 +16,19 @@ class Passage(BaseModel):
     url: str = ""
 
 
+class LocatedPassage(Passage):
+    char_start: int
+    char_end: int
+
+
 class Finding(BaseModel):
+    finding_id: str = ""
     assessment: str = Field(min_length=1)
     action: str = Field(min_length=1)
     source: str
     quote: str = Field(min_length=1)
+    char_start: int = Field(default=-1, ge=-1)
+    char_end: int = Field(default=-1, ge=-1)
 
 
 class Review(BaseModel):
@@ -28,9 +36,12 @@ class Review(BaseModel):
     unknowns: list[str] = Field(max_length=6)
 
 
-def passages(text="", pdf=None):
+def passages(text="", pdf=None, *, include_offsets=False):
     if pdf is None:
-        parts = [(f"Paragraph {i}", p.strip()) for i, p in enumerate(re.split(r"\n\s*\n", text), 1)]
+        parts = [
+            (f"Paragraph {i}", p if include_offsets else p.strip())
+            for i, p in enumerate(re.split(r"\n\s*\n", text), 1)
+        ]
     else:
         if not pdf.startswith(b"%PDF-") or len(pdf) > 20_000_000:
             raise ValueError("Upload a PDF under 20 MB")
@@ -41,9 +52,14 @@ def passages(text="", pdf=None):
     items = []
     for locator, value in parts:
         for start in range(0, len(value), 1600):
-            excerpt = value[start:start+1600].strip()
+            chunk = value[start:start+1600]
+            excerpt = chunk.strip()
             if excerpt:
-                items.append(Passage(id=f"S{len(items)+1}", locator=locator, text=excerpt, title="Submission"))
+                item = Passage(id=f"S{len(items)+1}", locator=locator, text=excerpt, title="Submission")
+                if include_offsets:
+                    first = start + len(chunk) - len(chunk.lstrip())
+                    item = LocatedPassage(**item.model_dump(), char_start=first, char_end=first + len(excerpt))
+                items.append(item)
     if not items:
         raise ValueError("Provide readable text")
     return items
@@ -70,6 +86,12 @@ def validate_review(review, sources):
     by_id = {item.id:item for item in sources}
     for finding in review.findings:
         passage = by_id.get(finding.source)
-        if passage is None or finding.quote not in passage.text:
+        if passage is None:
             raise ValueError("Finding has an invalid source or quotation")
+        first = passage.text.find(finding.quote)
+        if first < 0 or passage.text.find(finding.quote, first + 1) >= 0:
+            raise ValueError("Finding quotation must resolve to one exact span")
+        finding.char_start, finding.char_end = first, first + len(finding.quote)
+        if len(finding.quote.strip()) < 20 and finding.quote.strip() != passage.text.strip():
+            raise ValueError("Finding quotation is too short")
     return review
